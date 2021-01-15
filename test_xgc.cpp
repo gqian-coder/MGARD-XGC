@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
   duration = stop - start;
   std::cout << "closed reader (" << SECONDS(duration) << " s)" << std::endl;
 
-  size_t ns = 257;//shape[2];
+  size_t ns = shape[2];
 //  const std::array<std::size_t, 1> dims = {u_global_size};
   std::cout << "readin: {" << shape[0] << ", " << shape[1] << ", " << ns << ", " << shape[3] << "}\n";
   const std::array<std::size_t, 4> dims = {shape[0], shape[1], ns, shape[3]};

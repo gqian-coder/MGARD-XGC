@@ -74,14 +74,21 @@ plt.triplot(trimesh, alpha=0.2)
 
 colormap = plt.cm.Dark2
 f_fsa = list()
+in_fsa_idx = set([]) 
 for i in range(len(psi_surf)):
     n = surf_len[i]
     k = surf_idx[i,:n]-1
+    in_fsa_idx.update(k)
     f_fsa.append(f_new[:,k,:,:])
-    plt.plot(r[k], z[k], '-', c=colormap(i%colormap.N))
-    plt.plot(r[k[0]], z[k[0]], 's', c=colormap(i%colormap.N))
-    plt.savefig('group_by_flux_surface.eps')
+#    plt.plot(r[k], z[k], '-', c=colormap(i%colormap.N))
+#    plt.plot(r[k[0]], z[k[0]], 's', c=colormap(i%colormap.N))
+#    plt.savefig('group_by_flux_surface.eps')
 
+out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
+print("# nodes outside flux surface: ", len(out_fsa_idx))
+print("# nodes inside flux surface: ", len(in_fsa_idx))
+out_fsa = f_new[:,out_fsa_idx,:,:] 
 with ad2.open("untwisted_xgc.f0.00400.bp", "w") as fh:
     for i in range(len(psi_surf)):
         fh.write("i_f", f_fsa[i], f_fsa[i].shape, [0,0,0,0], f_fsa[i].shape, end_step=True)
+    fh.write("i_f", out_fsa, out_fsa.shape, [0,0,0,0], out_fsa.shape, end_step=True)

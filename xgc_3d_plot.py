@@ -43,16 +43,20 @@ for iphi in range(1,8):
 nextnode_arr = np.array(nextnode_list)
 nextnode_arr.shape
 
-with ad2.open('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.00400.bp','r') as f:
-    i_f = f.read('i_f')
-i_f = np.moveaxis(i_f,1,2)
-print (i_f.shape)
+with ad2.open('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/xgc.f3d.00400.bp','r') as f:
+    i_T_para = f.read('i_T_para')
+print (i_T_para.shape)
+np.save('T_para_400.npy', i_T_para)
 
-f_new = np.zeros_like(i_f)
+T_new = np.zeros_like(i_T_para)
 for iphi in range(8):
     od = nextnode_arr[iphi]
-    f_new[iphi,:,:,:] = i_f[iphi,od,:,:]
+    T_new[:, iphi] = i_T_para[od, iphi]
+np.save('T_para_untwisted_400.npy', T_new)
 
+with ad2.open('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.00400.bp','r') as f:
+    i_f = f.read('i_f')
+np.save('i_f_400.npy', i_f)
 '''
 plt.figure(figsize=[32,8])
 for iphi in range(8):    
@@ -65,14 +69,14 @@ for iphi in range(8):
     plt.xlim([2.15,2.30])
     plt.title('iphi: %d'%iphi)
     plt.tight_layout()
-'''
+
 #Group by flux surface index
-plt.figure(figsize=[8,16])
+#plt.figure(figsize=[8,16])
 
-trimesh = tri.Triangulation(r, z, conn)
-plt.triplot(trimesh, alpha=0.2)
+#trimesh = tri.Triangulation(r, z, conn)
+#plt.triplot(trimesh, alpha=0.2)
 
-colormap = plt.cm.Dark2
+#colormap = plt.cm.Dark2
 f_fsa = list()
 in_fsa_idx = set([]) 
 for i in range(len(psi_surf)):
@@ -95,3 +99,4 @@ with ad2.open("untwisted_flat_xgc.f0.00400.bp", "w") as fh:
         fh.write("i_f", f_fsa[i], [inSize], [0], [inSize], end_step=True)
     for i in range(len(out_fsa_idx)):
         fh.write("i_f", out_fsa[:,i,:,:], [8*39*39], [0], [8*39*39], end_step=True)
+'''

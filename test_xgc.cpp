@@ -54,7 +54,8 @@ int main(int argc, char **argv) {
   adios2::IO reader_io = ad.DeclareIO("XGC");
 
   start = clock.now();
-  adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/MReduction/MGARDx/build/test/data/xgc.f0.00420.bp", adios2::Mode::Read);
+  adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.00400.bp", adios2::Mode::Read);
+//  adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/MReduction/MGARDx/build/test/data/xgc.f0.00420.bp", adios2::Mode::Read);
   stop = clock.now();
   duration = stop - start;
   std::cout << "constructed reader (" << SECONDS(duration) << " s)" << std::endl;;

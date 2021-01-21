@@ -53,6 +53,9 @@ for iphi in range(8):
     od = nextnode_arr[iphi]
     f_new[iphi,:,:,:] = i_f[iphi,od,:,:]
 
+with ad2.open("untwisted_4D.bp", "w") as fh:
+    fh.write("i_f", f_new, f_new.shape,  [0,0,0,0],  f_new.shape)
+
 '''
 plt.figure(figsize=[32,8])
 for iphi in range(8):    
@@ -78,6 +81,7 @@ in_fsa_idx = set([])
 for i in range(len(psi_surf)):
     n = surf_len[i]
     k = surf_idx[i,:n]-1
+#    print(k)
     in_fsa_idx.update(k)
     f_fsa.append(f_new[:,k,:,:])
 #    plt.plot(r[k], z[k], '-', c=colormap(i%colormap.N))
@@ -88,10 +92,9 @@ out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
 print("# nodes outside flux surface: ", len(out_fsa_idx))
 print("# nodes inside flux surface: ", len(in_fsa_idx))
 out_fsa = f_new[:,out_fsa_idx,:,:] 
-with ad2.open("untwisted_flat_xgc.f0.00400.bp", "w") as fh:
+with ad2.open("untwisted_xgc.f0.00400.bp", "w") as fh:
     for i in range(len(psi_surf)):
-        inSize = f_fsa[i].shape[0]*f_fsa[i].shape[1]*f_fsa[i].shape[2]*f_fsa[i].shape[3]
-        print(i, np.count_nonzero(f_fsa[i])/39/39/8, f_fsa[i].shape)
-        fh.write("i_f", f_fsa[i], [inSize], [0], [inSize], end_step=True)
+#        print(i, np.count_nonzero(f_fsa[i])/39/39/8, f_fsa[i].shape)
+        fh.write("i_f", f_fsa[i], f_fsa[i].shape, [0,0,0,0], f_fsa[i].shape, end_step=True)
     for i in range(len(out_fsa_idx)):
-        fh.write("i_f", out_fsa[:,i,:,:], [8*39*39], [0], [8*39*39], end_step=True)
+        fh.write("i_f", out_fsa[:,i,:,:], [8,1,39,39], [0,0,0,0,], [8,1,39,39], end_step=True)

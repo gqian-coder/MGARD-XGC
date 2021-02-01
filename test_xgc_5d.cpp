@@ -30,7 +30,8 @@ void FileWriter_ad(const char *filename, Type *data, std::vector<size_t> global_
     std::cout << "processor " << rank << ": {" << global_dim[0] << ", " << global_dim[1] << ", " << global_dim[2] << ", " << global_dim[3] << ", " << global_dim[4] << "}, {";
     std::cout << local_dim[0] << ", " <<local_dim[1] << ", " << local_dim[2] << ", " << local_dim[3] << ", " << local_dim[4] << "}, " << para_dim*rank << "\n";
     adios2::Variable<Type> bp_fdata = bpIO.DefineVariable<Type>(
-          "i_f_5d", global_dim, {0, para_dim*rank ,0, 0, 0}, local_dim,  adios2::ConstantDims);
+//          "i_f_5d", global_dim, {0, 0, para_dim*rank , 0, 0}, local_dim,  adios2::ConstantDims);
+          "i_f_5d", global_dim, {0, 0, 0, para_dim*rank, 0}, local_dim,  adios2::ConstantDims);
     // Engine derived class, spawned to start IO operations //
     adios2::Engine bpFileWriter = bpIO.Open(filename, adios2::Mode::Write);
     bpFileWriter.Put<Type>(bp_fdata, data);
@@ -77,14 +78,17 @@ int main(int argc, char **argv) {
     if (rank==0)
         std::cout << "err tolerance: " << tol << "\n";
 
+    start = clock.now();
     adios2::ADIOS ad(MPI_COMM_WORLD);
     adios2::IO reader_io = ad.DeclareIO("XGC");
 
     for (size_t ts = 0; ts < timeSteps; ts ++) {
         if (ts==0)
-            sprintf(filename, "/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_4D_600.bp"); 
+            sprintf(filename, "/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.00600.bp");
+//            sprintf(filename, "/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_4D_600.bp"); 
         else
-            sprintf(filename, "/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_4D_6%d.bp", ts*10);
+            sprintf(filename, "/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.006%d.bp", ts*10);
+//            sprintf(filename, "/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_4D_6%d.bp", ts*10);
         adios2::Engine reader = reader_io.Open(filename, adios2::Mode::Read);
 
         // Inquire variable
@@ -93,10 +97,14 @@ int main(int argc, char **argv) {
 
         if (ts==0) {
             shape = var_i_f_in.Shape();
-            temp_dim = (size_t)ceil((float)shape[1]/size);
-            temp_sz  = temp_dim*shape[0]*shape[2]*shape[3];
-            local_dim = ((rank==size-1) ? (shape[1]-temp_dim*rank) : temp_dim); 
-            local_sz  = local_dim*shape[0]*shape[2]*shape[3];
+//            temp_dim = (size_t)ceil((float)shape[1]/size);
+//            temp_sz  = temp_dim*shape[0]*shape[2]*shape[3];
+//            local_dim = ((rank==size-1) ? (shape[1]-temp_dim*rank) : temp_dim);
+//            local_sz  = local_dim*shape[0]*shape[2]*shape[3];
+            temp_dim = (size_t)ceil((float)shape[2]/size);
+            temp_sz  = temp_dim*shape[0]*shape[1]*shape[3];
+            local_dim = ((rank==size-1) ? (shape[2]-temp_dim*rank) : temp_dim); 
+            local_sz  = local_dim*shape[0]*shape[1]*shape[3]; 
             i_f_5d = new double[temp_sz * timeSteps];
             if (rank==0) {   
                 std::cout << "global shape: {" << shape[0] << ", " << shape[1] << ", " << shape[2] << ", " << shape[3] << "}, ";
@@ -104,7 +112,8 @@ int main(int argc, char **argv) {
         }
         std::cout << "processor " << rank << " read " << filename << " frome: {0, " << temp_dim*rank << ", 0, 0} for {";
         std::cout << shape[0] << ", " << local_dim << ", " << shape[2] << ", " << shape[3] << "}.\n";
-        var_i_f_in.SetSelection(adios2::Box<adios2::Dims>({0, temp_dim*rank, 0, 0}, {shape[0], local_dim, shape[2], shape[3]}));
+//        var_i_f_in.SetSelection(adios2::Box<adios2::Dims>({0, temp_dim*rank, 0, 0}, {shape[0], local_dim, shape[2], shape[3]}));
+        var_i_f_in.SetSelection(adios2::Box<adios2::Dims>({0, 0, temp_dim*rank, 0}, {shape[0], shape[1], local_dim, shape[3]}));
 
         std::vector<double> i_f;
         reader.Get<double>(var_i_f_in, i_f);
@@ -114,15 +123,17 @@ int main(int argc, char **argv) {
     }
     std::cout << "begin compression...\n";
     if (timeSteps==1) {
-        const std::array<std::size_t, 4> dims = {shape[0], local_dim, shape[2], shape[3]};
+        const std::array<std::size_t, 4> dims = {shape[0], shape[1], local_dim, shape[3]};
         const mgard::TensorMeshHierarchy<4, double> hierarchy(dims);
         const size_t ndof = hierarchy.ndof();
         const mgard::CompressedDataset<4, double> compressed = mgard::compress(hierarchy, i_f_5d, 0.0, tol);
         std::cout << "processor " << rank << ", after compression: " << compressed.size() << "\n";
         const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed);
-        FileWriter_ad("decompressed_5d.bp", (double *)decompressed.data(), {shape[0], shape[1], shape[2], shape[3], timeSteps}, {shape[0], local_dim, shape[2], shape[3], timeSteps}, temp_dim);
+//        FileWriter_ad("decompressed_5d.bp", (double *)decompressed.data(), {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], shape[1], local_dim, shape[3]}, temp_dim);
+//        FileWriter_ad("decompressed_5d.bp", (double *)decompressed.data(), {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], local_dim, shape[2], shape[3]}, temp_dim);
     } else {
-        const std::array<std::size_t, 5> dims = {shape[0], local_dim, shape[2], shape[3], timeSteps}; 
+//        const std::array<std::size_t, 5> dims = {timeSteps, shape[0], local_dim, shape[2], shape[3]}; 
+        const std::array<std::size_t, 5> dims = {timeSteps, shape[0], shape[1], local_dim, shape[3]};
         const mgard::TensorMeshHierarchy<5, double> hierarchy(dims);
         const size_t ndof = hierarchy.ndof();
 //        start = clock.now();
@@ -130,14 +141,17 @@ int main(int argc, char **argv) {
 //    stop = clock.now();
 //    duration = stop - start;
 //    const double throughput = static_cast<double>(sizeof(double) * ndof) / (1 << 20) / SECONDS(duration);
-//    std::cout << "Compression: " << std::floor(SECONDS(duration)/60.0) << "min and " << SECONDS(duration)%60 << "sec, and throughput = "; 
-//    std::cout << throughput << " MiB / s" << std::endl;
-        std::cout << "processor " << rank << ", after compression: " << compressed.size() << "\n"; 
+//    std::cout << "Processor " << rank << ": compression: " << std::floor(SECONDS(duration)/60.0) << "min and " << SECONDS(duration)%60 << "sec, and throughput = " << throughput << " MiB / s" << std::endl;
+        std::cout << "Processor " << rank << ", after compression: " << compressed.size() << "\n"; 
 //    FileWriter_bin("compressed.bin", (unsigned char *)compressed.data(), compressed.size());
 
         const mgard::DecompressedDataset<5, double> decompressed = mgard::decompress(compressed); 
-        FileWriter_ad("decompressed_5d.bp", (double *)decompressed.data(), {shape[0], shape[1], shape[2], shape[3], timeSteps}, {shape[0], local_dim, shape[2], shape[3], timeSteps}, temp_dim);
+//        FileWriter_ad("decompressed_5d_8ts.bp", (double *)decompressed.data(), {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], local_dim, shape[2], shape[3]}, temp_dim);
+//        FileWriter_ad("decompressed_5d_8ts.bp", (double *)decompressed.data(), {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], shape[1], local_dim, shape[3]}, temp_dim);
     }
+    stop = clock.now();
+    duration = stop - start;
+    std::cout << "Processor " << rank << ": compression: " << std::floor(SECONDS(duration)/60.0) << "min and " << SECONDS(duration)%60 << "sec" << std::endl;
     delete i_f_5d;
     MPI_Finalize();
 }

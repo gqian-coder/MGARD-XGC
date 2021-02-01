@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
   start = clock.now();
 //  adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.00400.bp", adios2::Mode::Read);
 //  adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/MReduction/MGARDx/build/test/data/xgc.f0.00420.bp", adios2::Mode::Read);
-  adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/untwisted_4D.bp", adios2::Mode::Read);
+  adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/data/twisted_4D.bp", adios2::Mode::Read);
   stop = clock.now();
   duration = stop - start;
   std::cout << "constructed reader (" << SECONDS(duration) << " s)" << std::endl;;
@@ -113,15 +113,15 @@ int main(int argc, char **argv) {
   size_t ns = shape[2];
 //  const std::array<std::size_t, 1> dims = {u_global_size};
   std::cout << "readin: {" << shape[0] << ", " << shape[1] << ", " << ns << ", " << shape[3] << "}\n";
-  const std::array<std::size_t, 4> dims = {shape[0], shape[1], ns, shape[3]};
+  const std::array<std::size_t, 3> dims = {shape[0]*shape[1], ns, shape[3]};
   std::cout << "begin compression...\n";
 
-  const mgard::TensorMeshHierarchy<4, double> hierarchy(dims);
+  const mgard::TensorMeshHierarchy<3, double> hierarchy(dims);
   const size_t ndof = hierarchy.ndof();
   tol = 1e13;
   std::cout << "err tolerance: " << tol << "\n";
   start = clock.now();
-  const mgard::CompressedDataset<4, double> compressed =
+  const mgard::CompressedDataset<3, double> compressed =
 	  mgard::compress(hierarchy, i_f.data(), 0.0, tol);
   stop = clock.now();
   duration = stop - start;
@@ -134,13 +134,13 @@ int main(int argc, char **argv) {
 
   stop = clock.now();
   duration = stop - start;
-  const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed); 
+  const mgard::DecompressedDataset<3, double> decompressed = mgard::decompress(compressed); 
   const double throughput_d = static_cast<double>(sizeof(double) * ndof) / (1 << 20) / SECONDS(duration);
   std::cout << "Decompression: " << std::floor(SECONDS(duration)/60.0) << "min and " << SECONDS(duration)%60 << "sec, and throughput = ";
   std::cout  << throughput_d << " MiB / s" << std::endl;
   FileWriter_bin("decompressed.bin", (double *)decompressed.data(), shape[0]*shape[1]*ns*shape[3]);
 
-  FileWriter_ad("decompressed.bp", (double *)decompressed.data(), {shape[0], shape[1], ns, shape[3]});
+  FileWriter_ad("decompressed_3d.bp", (double *)decompressed.data(), {shape[0], shape[1], ns, shape[3]});
 
   auto err = L_inif_L2_error(i_f.data(), (double*)decompressed.data(), shape[0]*shape[1]*shape[2]*shape[3]);
   double l_inf= err[0];

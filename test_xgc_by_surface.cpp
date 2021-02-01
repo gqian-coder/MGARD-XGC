@@ -4,6 +4,9 @@
 #include <vector>
 #include <chrono>
 #include <numeric>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
 
 #include "adios2.h"
 #include "mgard_api.h"
@@ -40,7 +43,7 @@ const double* mgard_reconstruct_3D(Type *data, std::vector<size_t> shape, size_t
     double tol = 1e13;
     const mgard::CompressedDataset<3, double> compressed =
         mgard::compress(hierarchy, data, 0.0, tol);
-    std::cout << "after compression: " << compressed.size() << "\n";
+//    std::cout << "after compression: " << compressed.size() << "\n";
     const mgard::DecompressedDataset<3, Type> decompressed = mgard::decompress(compressed);
 //    FileWriter_ad(("i_f.mgard." + std::to_string(timeStep) + ".bp").c_str(), (double *)decompressed.data(), {shape[0], 1, shape[1], shape[2]});
     return decompressed.data();
@@ -56,12 +59,24 @@ const double* mgard_reconstruct_4D(Type *data, std::vector<size_t> shape, size_t
     double tol = 1e13;
     const mgard::CompressedDataset<4, double> compressed =
         mgard::compress(hierarchy, data, 0.0, tol);
-    std::cout << "after compression: " << compressed.size() << "\n";
+//    std::cout << "after compression: " << compressed.size() << "\n";
     const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed);
 //    FileWriter_ad(("i_f.mgard." + std::to_string(timeStep) + ".bp").c_str(), (double *)decompressed.data(), shape);
     return decompressed.data();
 }
 
+template<typename Real>
+std::vector<double> L_inif_L2_error(Real *ori, Real *rct, size_t count)
+{
+    double l2_e = 0.0, l_inf = 0.0, err;
+    for (size_t i=0; i<count; i++) {
+        err = abs(ori[i] - rct[i]);
+        l_inf  = std::max(l_inf, err); 
+        l2_e  += err*err; 
+    }
+    std::vector<double>err_vec{l_inf, l2_e/(double)count};
+    return err_vec;
+}
 
 int main(int argc, char **argv) {
 	std::chrono::steady_clock clock;
@@ -73,7 +88,7 @@ int main(int argc, char **argv) {
 //    adios2::ADIOS ad_w;
     // Reader I/0
     adios2::IO reader_io = ad.DeclareIO("XGC");
-    adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/untwisted_xgc.f0.00400.bp", adios2::Mode::Read); 
+    adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/data/untwisted_xgc.f0.00400.bp", adios2::Mode::Read); 
     adios2::Variable<double> var_i_f_in;
     // Writer i/O
     adios2::IO writer_io = ad.DeclareIO("Output"); 
@@ -85,56 +100,58 @@ int main(int argc, char **argv) {
     size_t tot_elem = 0;
     adios2::fstep iStep;
     tol = 1e13;
+    double l2_e = 0.0, l_inf=0.0;
     for (unsigned int timeStep = 0; timeStep < 497; ++timeStep) { 
         reader.BeginStep();
         var_i_f_in = reader_io.InquireVariable<double>("i_f");
         std::vector<std::size_t> shape = var_i_f_in.Shape();
-        var_i_f_in.SetSelection(adios2::Box<adios2::Dims>(
-                    {0, 0, 0, 0}, shape));//{shape[0],  shape[1], shape[2], shape[3]}));
+        var_i_f_in.SetSelection(adios2::Box<adios2::Dims>({0, 0, 0, 0}, shape));
         std::vector<double>i_f_in;
         reader.Get<double>(var_i_f_in, i_f_in); 
         reader.EndStep();
-        size_t num_nz = 0;
-        std::cout << "step " << timeStep << " readin: " << i_f_in.size()/39/39/8 << " nodes \n";
-        for (unsigned int it=0; it<i_f_in.size(); it++) {
-            num_nz += (i_f_in[it]==0); 
-        }
-        std::cout << "step " << timeStep << ": number of zeros = " << num_nz << "\n";
+//        std::cout << "step " << timeStep << " readin: " << i_f_in.size()/39/39/8 << " nodes \n";
         tot_elem += std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<double>());
         start = clock.now();
-        std::cout << "step " << timeStep << " read: {" << shape[0] << ",";
-        std::cout << shape[1] << "," << shape[2] << "," << shape[3] << "}\n";
+//        std::cout << "step " << timeStep << " read: {" << shape[0] << ",";
+//        std::cout << shape[1] << "," << shape[2] << "," << shape[3] << "}\n";
         if (shape[1] < 2) {
-            for (unsigned int k = 0; k < shape[1]; k ++) {
-                const std::array<size_t, 3> dims = {shape[0], shape[2], shape[3]};
-                const mgard::TensorMeshHierarchy<3, double> hierarchy(dims);
-                const mgard::CompressedDataset<3, double> compressed =
-                mgard::compress(hierarchy, i_f_in.data(), 0.0, tol);
-                std::cout << "after compression: " << compressed.size() << "\n";
-                const mgard::DecompressedDataset<3, double> decompressed = mgard::decompress(compressed);
-                writer.BeginStep();
-                var_i_f_out.SetSelection(adios2::Box<adios2::Dims>({}, {shape[0]*shape[1]*shape[2]*shape[3]}));
-                writer.Put<double>(var_i_f_out, (double *)decompressed.data());
-                writer.EndStep();
-            }
+            const std::array<size_t, 3> dims = {shape[0], shape[2], shape[3]};
+            const mgard::TensorMeshHierarchy<3, double> hierarchy(dims);
+            const mgard::CompressedDataset<3, double> compressed =
+            mgard::compress(hierarchy, i_f_in.data(), 0.0, tol);
+//            std::cout << "after compression: " << compressed.size() << "\n";
+            const mgard::DecompressedDataset<3, double> decompressed = mgard::decompress(compressed);
+            writer.BeginStep();
+            var_i_f_out.SetSelection(adios2::Box<adios2::Dims>({}, {shape[0]*shape[1]*shape[2]*shape[3]}));
+            writer.Put<double>(var_i_f_out, (double *)decompressed.data());
+            writer.EndStep();
+            auto err = L_inif_L2_error(i_f_in.data(), (double *)decompressed.data(), shape[0]*shape[1]*shape[2]*shape[3]);
+            l_inf  = std::max(l_inf, err[0]);
+            l2_e  += err[1];
+            std::cout << "step " << timeStep << ": L_inf=" << err[0] << ", L2-err=" << err[1] << "\n";
         } else {
 //            const double *reconstructed = mgard_reconstruct_4D(i_f_in.data(), shape, timeStep);
             const std::array<size_t, 4> dims = {shape[0], shape[1], shape[2], shape[3]};
             const mgard::TensorMeshHierarchy<4, double> hierarchy(dims);
             const mgard::CompressedDataset<4, double> compressed =
             mgard::compress(hierarchy, i_f_in.data(), 0.0, tol);
-            std::cout << "after compression: " << compressed.size() << "\n";
+//            std::cout << "after compression: " << compressed.size() << "\n";
             const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed);
             writer.BeginStep();
             var_i_f_out.SetSelection(adios2::Box<adios2::Dims>({}, {shape[0]*shape[1]*shape[2]*shape[3]}));
             writer.Put<double>(var_i_f_out, (double *)decompressed.data());
             writer.EndStep();
+            auto err = L_inif_L2_error(i_f_in.data(), (double*)decompressed.data(), shape[0]*shape[1]*shape[2]*shape[3]);
+            l_inf  = std::max(l_inf, err[0]);
+            l2_e  += err[1];
+            std::cout << "step " << timeStep << ": L_inf=" << err[0] << ", L2-err=" << err[1] << "\n";
         }
         // MGARD Compression
         stop = clock.now();
         rct_sec += SECONDS(stop - start); 
     } 
     reader.Close();
+    std::cout << "L-inf: " << l_inf << ", L2-norm error: " << sqrt(l2_e) << "\n";
 //    writer.Close();
     const double throughput_d = static_cast<double>(sizeof(double) * tot_elem) / (1 << 20) / rct_sec; 
     std::cout << "Total reconstruction cost: " << std::floor(rct_sec/60.0) << " min and " << rct_sec%60 << " sec, and throughput = ";

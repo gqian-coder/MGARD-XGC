@@ -109,26 +109,35 @@ int main(int argc, char **argv) {
         std::vector<double> i_f;
         reader.Get<double>(var_i_f_in, i_f);
         reader.Close();
+        std::cout << "processor " << rank << ": offset = " << temp_sz*ts << "\n";
         memcpy(&i_f_5d[ts*temp_sz], i_f.data(), local_sz*sizeof(double));
     }
-    const std::array<std::size_t, 5> dims = {shape[0], local_dim, shape[2], shape[3], timeSteps}; 
     std::cout << "begin compression...\n";
-
-    const mgard::TensorMeshHierarchy<5, double> hierarchy(dims);
-    const size_t ndof = hierarchy.ndof();
-//    start = clock.now();
-    const mgard::CompressedDataset<5, double> compressed = mgard::compress(hierarchy, i_f_5d, 0.0, tol);
+    if (timeSteps==1) {
+        const std::array<std::size_t, 4> dims = {shape[0], local_dim, shape[2], shape[3]};
+        const mgard::TensorMeshHierarchy<4, double> hierarchy(dims);
+        const size_t ndof = hierarchy.ndof();
+        const mgard::CompressedDataset<4, double> compressed = mgard::compress(hierarchy, i_f_5d, 0.0, tol);
+        std::cout << "processor " << rank << ", after compression: " << compressed.size() << "\n";
+        const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed);
+        FileWriter_ad("decompressed_5d.bp", (double *)decompressed.data(), {shape[0], shape[1], shape[2], shape[3], timeSteps}, {shape[0], local_dim, shape[2], shape[3], timeSteps}, temp_dim);
+    } else {
+        const std::array<std::size_t, 5> dims = {shape[0], local_dim, shape[2], shape[3], timeSteps}; 
+        const mgard::TensorMeshHierarchy<5, double> hierarchy(dims);
+        const size_t ndof = hierarchy.ndof();
+//        start = clock.now();
+        const mgard::CompressedDataset<5, double> compressed = mgard::compress(hierarchy, i_f_5d, 0.0, tol);
 //    stop = clock.now();
 //    duration = stop - start;
 //    const double throughput = static_cast<double>(sizeof(double) * ndof) / (1 << 20) / SECONDS(duration);
 //    std::cout << "Compression: " << std::floor(SECONDS(duration)/60.0) << "min and " << SECONDS(duration)%60 << "sec, and throughput = "; 
 //    std::cout << throughput << " MiB / s" << std::endl;
-    std::cout << "processor " << rank << ", after compression: " << compressed.size() << "\n"; 
+        std::cout << "processor " << rank << ", after compression: " << compressed.size() << "\n"; 
 //    FileWriter_bin("compressed.bin", (unsigned char *)compressed.data(), compressed.size());
 
-    const mgard::DecompressedDataset<5, double> decompressed = mgard::decompress(compressed); 
-
-    FileWriter_ad("decompressed_5d.bp", (double *)decompressed.data(), {shape[0], shape[1], shape[2], shape[3], timeSteps}, {shape[0], local_dim, shape[2], shape[3], timeSteps}, temp_dim);
+        const mgard::DecompressedDataset<5, double> decompressed = mgard::decompress(compressed); 
+        FileWriter_ad("decompressed_5d.bp", (double *)decompressed.data(), {shape[0], shape[1], shape[2], shape[3], timeSteps}, {shape[0], local_dim, shape[2], shape[3], timeSteps}, temp_dim);
+    }
     delete i_f_5d;
     MPI_Finalize();
 }

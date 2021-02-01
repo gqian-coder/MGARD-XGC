@@ -1,6 +1,6 @@
 import numpy as np
 import sys
-#sys.path.append('/ccs/home/gongq/indir/lib/python3.7/site-packages/adios2/')
+sys.path.append('/ccs/home/gongq/indir/lib/python3.7/site-packages/adios2/')
 import matplotlib.pyplot as plt
 import adios2 as ad2
 import math 

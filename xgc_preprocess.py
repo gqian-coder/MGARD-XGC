@@ -43,58 +43,40 @@ for iphi in range(1,8):
 nextnode_arr = np.array(nextnode_list)
 nextnode_arr.shape
 
-with ad2.open('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.00400.bp','r') as f:
-    i_f = f.read('i_f')
-i_f = np.moveaxis(i_f,1,2)
-print (i_f.shape)
+for fstep in range(9):
+    print("timestep: ", fstep)
+    filename = ('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.007' + str(fstep) + '0.bp')
+    with ad2.open(filename, 'r') as f:
+        i_f = f.read('i_f')
+        i_f = np.moveaxis(i_f,1,2)
+        print (i_f.shape)
 
-f_new = np.zeros_like(i_f)
-for iphi in range(8):
-    od = nextnode_arr[iphi]
-    f_new[iphi,:,:,:] = i_f[iphi,od,:,:]
+    f_new = np.zeros_like(i_f)
+    for iphi in range(8):
+        od = nextnode_arr[iphi]
+        f_new[iphi,:,:,:] = i_f[iphi,od,:,:]
 
-with ad2.open("untwisted_4D.bp", "w") as fh:
-    fh.write("i_f", f_new, f_new.shape,  [0,0,0,0],  f_new.shape)
+    filename = ('/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_4D_7'+ str(fstep) + '0.bp')
+    with ad2.open(filename, "w") as fh:
+        fh.write("i_f", f_new, f_new.shape,  [0,0,0,0],  f_new.shape)
 
-'''
-plt.figure(figsize=[32,8])
-for iphi in range(8):    
-    plt.subplot(1, 8, iphi+1)
-    trimesh = tri.Triangulation(r, z, conn)
-    plt.tricontourf(trimesh, np.sum(f_new[iphi,:], axis=(1,2)))
-    plt.axis('scaled')
-    plt.axis('off')
-    plt.ylim([0.0,0.3])
-    plt.xlim([2.15,2.30])
-    plt.title('iphi: %d'%iphi)
-    plt.tight_layout()
-'''
-#Group by flux surface index
-plt.figure(figsize=[8,16])
-
-trimesh = tri.Triangulation(r, z, conn)
-plt.triplot(trimesh, alpha=0.2)
-
-colormap = plt.cm.Dark2
-f_fsa = list()
-in_fsa_idx = set([]) 
-for i in range(len(psi_surf)):
-    n = surf_len[i]
-    k = surf_idx[i,:n]-1
-#    print(k)
-    in_fsa_idx.update(k)
-    f_fsa.append(f_new[:,k,:,:])
-#    plt.plot(r[k], z[k], '-', c=colormap(i%colormap.N))
-#    plt.plot(r[k[0]], z[k[0]], 's', c=colormap(i%colormap.N))
-#    plt.savefig('group_by_flux_surface.eps')
-
-out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
-print("# nodes outside flux surface: ", len(out_fsa_idx))
-print("# nodes inside flux surface: ", len(in_fsa_idx))
-out_fsa = f_new[:,out_fsa_idx,:,:] 
-with ad2.open("untwisted_xgc.f0.00400.bp", "w") as fh:
+    f_fsa = list()
+    in_fsa_idx = set([])
     for i in range(len(psi_surf)):
-#        print(i, np.count_nonzero(f_fsa[i])/39/39/8, f_fsa[i].shape)
-        fh.write("i_f", f_fsa[i], f_fsa[i].shape, [0,0,0,0], f_fsa[i].shape, end_step=True)
-    for i in range(len(out_fsa_idx)):
-        fh.write("i_f", out_fsa[:,i,:,:], [8,1,39,39], [0,0,0,0,], [8,1,39,39], end_step=True)
+        n = surf_len[i]
+        k = surf_idx[i,:n]-1
+    #    print(k)
+        in_fsa_idx.update(k)
+        f_fsa.append(f_new[:,k,:,:])
+
+    out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
+    print("# nodes outside flux surface: ", len(out_fsa_idx))
+    print("# nodes inside flux surface: ", len(in_fsa_idx))
+    out_fsa = f_new[:,out_fsa_idx,:,:]
+    filename = ('/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_xgc.f0.007'+str(fstep)+'0.bp')
+    with ad2.open(filename, "w") as fh:
+        for i in range(len(psi_surf)):
+            fh.write("i_f", f_fsa[i], f_fsa[i].shape, [0,0,0,0], f_fsa[i].shape, end_step=True)
+        for i in range(len(out_fsa_idx)):
+            fh.write("i_f", out_fsa[:,i,:,:], [8,1,39,39], [0,0,0,0,], [8,1,39,39], end_step=True)
+

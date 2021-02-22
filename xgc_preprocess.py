@@ -41,9 +41,8 @@ for iphi in range(1,8):
     nextnode_list.append(current)
 
 nextnode_arr = np.array(nextnode_list)
-nextnode_arr.shape
 
-for fstep in range(9):
+for fstep in range(1):
     print("timestep: ", fstep)
     filename = ('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.007' + str(fstep) + '0.bp')
     with ad2.open(filename, 'r') as f:
@@ -56,27 +55,42 @@ for fstep in range(9):
         od = nextnode_arr[iphi]
         f_new[iphi,:,:,:] = i_f[iphi,od,:,:]
 
-    filename = ('/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_4D_7'+ str(fstep) + '0.bp')
+    filename = ('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/untwisted_4D_7'+ str(fstep) + '0.bp')
     with ad2.open(filename, "w") as fh:
-        fh.write("i_f", f_new, f_new.shape,  [0,0,0,0],  f_new.shape)
+       fh.write("i_f", np.ndarray.flatten(f_new), f_new.shape,  [0,0,0,0],  f_new.shape)
+    print('f_new shape: ', f_new.shape)
+    np.save('i_f_twt.npy',f_new)
 
     f_fsa = list()
     in_fsa_idx = set([])
     for i in range(len(psi_surf)):
         n = surf_len[i]
         k = surf_idx[i,:n]-1
+        buff_k = np.zeros(n+8, dtype='int')
+        buff_k[4:n+4] = k
+        for j in range(4):
+            if (n>3):
+                buff_k[j]   = k[3-j]
+                buff_k[j+n+4] = k[n-1-j] 
+            else:
+                buff_k[j]   = k[0]
+                buff_k[j+n+4] = k[n-1]
     #    print(k)
         in_fsa_idx.update(k)
-        f_fsa.append(f_new[:,k,:,:])
-
+        f_fsa.append(f_new[:,buff_k,:,:])
+    
     out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
+    print("# of psi surface: ", len(psi_surf))
     print("# nodes outside flux surface: ", len(out_fsa_idx))
     print("# nodes inside flux surface: ", len(in_fsa_idx))
-    out_fsa = f_new[:,out_fsa_idx,:,:]
-    filename = ('/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_xgc.f0.007'+str(fstep)+'0.bp')
+    for i in range(len(out_fsa_idx)):
+        buff_k = np.ones(9, dtype='int') * out_fsa_idx[i]
+        f_fsa.append(f_new[:,buff_k,:,:])
+    filename = ('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/new_test_buff.f0.007'+str(fstep)+'0.bp')
+#    filename = ('/gpfs/alpine/proj-shared/csc143/gongq/XGC/d3d_coarse_v2/untwisted_xgc.f0.007'+str(fstep)+'0.bp')
     with ad2.open(filename, "w") as fh:
-        for i in range(len(psi_surf)):
-            fh.write("i_f", f_fsa[i], f_fsa[i].shape, [0,0,0,0], f_fsa[i].shape, end_step=True)
-        for i in range(len(out_fsa_idx)):
-            fh.write("i_f", out_fsa[:,i,:,:], [8,1,39,39], [0,0,0,0,], [8,1,39,39], end_step=True)
+        for i in range(len(psi_surf) + len(out_fsa_idx)):
+#            print(np.ndarray.flatten(f_fsa[i]).flags)
+            print(f_fsa[i].shape)
+            fh.write("i_f", np.ndarray.flatten(f_fsa[i]), f_fsa[i].shape, [0,0,0,0], f_fsa[i].shape, end_step=True)
 

@@ -85,7 +85,7 @@ ibpStream.Close()
 f_twt_sf_rct_nodes = list()
 L_inf_twt_sf 	   = list()
 L_inf_twt_sf_perc  = list()
-L2_twt_sf 		   = list() 
+L2_twt_sf	   = list() 
 for i in range(steps):
     for j in range(f_twisted_sf[i].shape[1]):
         f_twt_sf_rct_nodes.append(np.sum(f_twt_sf_rct[i][:,j,:,:]))

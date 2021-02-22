@@ -88,11 +88,11 @@ int main(int argc, char **argv) {
 //    adios2::ADIOS ad_w;
     // Reader I/0
     adios2::IO reader_io = ad.DeclareIO("XGC");
-    adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/data/untwisted_xgc.f0.00400.bp", adios2::Mode::Read); 
+    adios2::Engine reader = reader_io.Open("/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/new_test_buff.f0.00700.bp", adios2::Mode::Read); 
     adios2::Variable<double> var_i_f_in;
     // Writer i/O
     adios2::IO writer_io = ad.DeclareIO("Output"); 
-    adios2::Engine writer = writer_io.Open("i_f.mgard.bp", adios2::Mode::Write); 
+    adios2::Engine writer = writer_io.Open("new_i_f.mgard.bp", adios2::Mode::Write); 
     adios2::Variable<double> var_i_f_out = writer_io.DefineVariable<double>("rct_i_f", {}, {}, {adios2::UnknownDim}); 
 
     // read data
@@ -101,6 +101,8 @@ int main(int argc, char **argv) {
     adios2::fstep iStep;
     tol = 1e13;
     double l2_e = 0.0, l_inf=0.0;
+    size_t compressed_sz = 0;
+    size_t original_sz = 0;
     for (unsigned int timeStep = 0; timeStep < 497; ++timeStep) { 
         reader.BeginStep();
         var_i_f_in = reader_io.InquireVariable<double>("i_f");
@@ -120,6 +122,8 @@ int main(int argc, char **argv) {
             const mgard::CompressedDataset<3, double> compressed =
             mgard::compress(hierarchy, i_f_in.data(), 0.0, tol);
 //            std::cout << "after compression: " << compressed.size() << "\n";
+            compressed_sz += compressed.size();
+            original_sz   += shape[0]*shape[1]*shape[2]*shape[3];
             const mgard::DecompressedDataset<3, double> decompressed = mgard::decompress(compressed);
             writer.BeginStep();
             var_i_f_out.SetSelection(adios2::Box<adios2::Dims>({}, {shape[0]*shape[1]*shape[2]*shape[3]}));
@@ -133,28 +137,32 @@ int main(int argc, char **argv) {
 //            const double *reconstructed = mgard_reconstruct_4D(i_f_in.data(), shape, timeStep);
             const std::array<size_t, 4> dims = {shape[0], shape[1], shape[2], shape[3]};
             const mgard::TensorMeshHierarchy<4, double> hierarchy(dims);
+             
             const mgard::CompressedDataset<4, double> compressed =
             mgard::compress(hierarchy, i_f_in.data(), 0.0, tol);
+            compressed_sz += compressed.size();
+            original_sz   += shape[0]*shape[1]*shape[2]*shape[3];
 //            std::cout << "after compression: " << compressed.size() << "\n";
             const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed);
             writer.BeginStep();
             var_i_f_out.SetSelection(adios2::Box<adios2::Dims>({}, {shape[0]*shape[1]*shape[2]*shape[3]}));
             writer.Put<double>(var_i_f_out, (double *)decompressed.data());
             writer.EndStep();
-            auto err = L_inif_L2_error(i_f_in.data(), (double*)decompressed.data(), shape[0]*shape[1]*shape[2]*shape[3]);
-            l_inf  = std::max(l_inf, err[0]);
-            l2_e  += err[1];
-            std::cout << "step " << timeStep << ": L_inf=" << err[0] << ", L2-err=" << err[1] << "\n";
+//            auto err = L_inif_L2_error(i_f_in.data(), (double*)decompressed.data(), shape[0]*shape[1]*shape[2]*shape[3]);
+//            l_inf  = std::max(l_inf, err[0]);
+//            l2_e  += err[1];
+            std::cout << "step " << timeStep << "\n";//": L_inf=" << err[0] << ", L2-err=" << err[1] << "\n";
         }
         // MGARD Compression
         stop = clock.now();
         rct_sec += SECONDS(stop - start); 
     } 
     reader.Close();
-    std::cout << "L-inf: " << l_inf << ", L2-norm error: " << sqrt(l2_e) << "\n";
-//    writer.Close();
+//    std::cout << "L-inf: " << l_inf << ", L2-norm error: " << sqrt(l2_e) << "\n";
+    writer.Close();
     const double throughput_d = static_cast<double>(sizeof(double) * tot_elem) / (1 << 20) / rct_sec; 
     std::cout << "Total reconstruction cost: " << std::floor(rct_sec/60.0) << " min and " << rct_sec%60 << " sec, and throughput = ";
     std::cout  << throughput_d << " MiB / s" << std::endl;
+    std::cout << "compression ratio: " << (double)(original_sz*8/compressed_sz) << ", ori: " << original_sz << ", compressed: " << compressed_sz << "\n";
 
 }

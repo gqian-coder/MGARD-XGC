@@ -1,8 +1,6 @@
 import numpy as np
-import sys
-sys.path.append('/ccs/home/gongq/andes/indir/lib/python3.7/site-packages/adios2/')
 import matplotlib.pyplot as plt
-import adios2 as ad2
+#import adios2 as ad2
 from math import atan, atan2, pi
 import tqdm
 import matplotlib.tri as tri
@@ -13,6 +11,10 @@ import matplotlib.tri as tri
 
 qoi_file = "QoI.npz"
 import xgc4py
+import f0_diag_test
+xgcexp = xgc4py.XGC('xgc_config/')
+xgc = f0_diag_test.XGC_f0_diag(xgcexp)
+
 '''
 with ad2.open('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/xgc.mesh.bp', 'r') as f:
     nnodes = int(f.read('n_n', ))

@@ -1,6 +1,8 @@
 import numpy as np
 import sys
 sys.path.append('/ccs/home/gongq/indir/lib/python3.7/site-packages/adios2/')
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import adios2 as ad2
 import math 
@@ -9,146 +11,172 @@ from math import atan, atan2, pi
 import tqdm
 import matplotlib.tri as tri
 
-steps = 497
+def relative_abs_error(x, y):
+    """
+    relative L-inf error: max(|x_i - y_i|)/max(|x_i|)
+    """
+    assert(x.shape == y.shape)
+    absv = np.abs(x-y)
+    maxv = np.max(np.abs(x))
+    return (absv/maxv)
 
+def relative_ptw_abs_error(x, y):
+    """
+    relative point-wise L-inf error: max(|x_i - y_i|/|x_i|)
+    """
+    assert(x.shape == y.shape)
+    absv = np.abs(x-y)
+    return (absv/x)
+
+steps = 101 
 adios = ad2.ADIOS()
 
-#with ad2.open('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/xgc.mesh.bp', 'r') as f:
-with ad2.open('/Users/qg7/Documents/Projs/XGC Fusion/data files/low_res/d3d_coarse_v2/xgc.mesh.bp', 'r') as f:
+import xgc4py
+exdir = '/gpfs/alpine/world-shared/phy122/sku/su412_f0_data/'
+#exdir = '/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/'
+xgcexp = xgc4py.XGC(exdir)
+
+with ad2.open(exdir+'xgc.mesh.bp', 'r') as f:
     nnodes = int(f.read('n_n', ))
     ncells = int(f.read('n_t', ))
-    rz = f.read('rz')
-    conn = f.read('nd_connect_list')
-    psi = f.read('psi')
+    rz     = f.read('rz')
+    conn   = f.read('nd_connect_list')
+    psi    = f.read('psi')
     nextnode = f.read('nextnode')
-    epsilon = f.read('epsilon')
+    epsilon  = f.read('epsilon')
     node_vol = f.read('node_vol')
     node_vol_nearest = f.read('node_vol_nearest')
     psi_surf = f.read('psi_surf')
     surf_idx = f.read('surf_idx')
     surf_len = f.read('surf_len')
 
-#with ad2.open('/gpfs/alpine/proj-shared/csc143/jyc/summit/xgc-deeplearning/d3d_coarse_v2/restart_dir/xgc.f0.00400.bp','r') as f:
-#    f_ori = f.read('i_f')
-f_ori = np.load('/Users/qg7/Documents/Projs/XGC Fusion/data files/low_res/d3d_coarse_v2/i_f_400.npy')
-f_ori = np.moveaxis(f_ori,1,2)
-print (f_ori.shape)
-nnodes = f_ori.shape[1]
+r = rz[:,0]
+z = rz[:,1]
 
-#with ad2.open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/data/decompressed.bp', 'r') as f:
-with ad2.open('/Users/qg7/Documents/Projs/XGC Fusion/data files/low_res/d3d_coarse_v2/decompressed.bp', 'r') as f:
+#with ad2.open(exdir + 'restart_dir/xgc.f0.00700.bp','r') as f:
+with ad2.open(exdir+'xgc.f0.10900.bp', 'r') as f:
+    f0_f = f.read('i_f')
+f0_f = np.moveaxis(f0_f,1,2)
+print (f0_f.shape)
+nnodes = f0_f.shape[1]
+
+#with ad2.open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/d3d_coarse_v2_700_flx_phi.bp.mgard', 'r') as f:
+with ad2.open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/results/su412_10900_flx.bp.mgard', 'r') as f:
     f_rct = f.read('i_f')
-f_rct = np.moveaxis(np.reshape(f_rct, [8, 39,nnodes,39]), 1,2)
+f_rct = np.moveaxis(f_rct,0,1)
+print(f_rct.shape)
 
-#with ad2.open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/decompressed_twisted_4d.bp', 'r') as f:
-with ad2.open('/Users/qg7/Documents/Projs/XGC Fusion/data files/low_res/d3d_coarse_v2/decompressed_twisted_4d.bp', 'r') as f:
-    f_twisted_rct = f.read('i_f')
-f_twisted_rct = np.moveaxis(np.reshape(f_twisted_rct, [8, 39,nnodes,39]), 1,2)
-
-#with ad2.open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/twisted_4D.bp', 'r') as f:
-with ad2.open('/Users/qg7/Documents/Projs/XGC Fusion/data files/low_res/d3d_coarse_v2/twisted_4D.bp', 'r') as f:
-    f_twisted_ori = f.read('i_f')
-f_twisted_ori = np.moveaxis(np.reshape(f_twisted_ori, [8, 39,nnodes,39]), 1,2)
-
-f_twisted_sf = list()
 in_fsa_idx = set([])
+_start = 0
+'''
+f0_ff = np.zeros_like(f_rct)
+f0_g = f_rct
 for i in range(len(psi_surf)):
     n = surf_len[i]
     k = surf_idx[i,:n]-1
     in_fsa_idx.update(k)
-    f_twisted_sf.append(f_twisted_ori[:,k,:,:])
-#    print(f_twisted_sf[-1].shape)
+    f0_ff[:,_start:_start+n,:,:] = f0_f[:,k,:,:]
+    _start = _start + n
 
 out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
-out_fsa = f_twisted_ori[:,out_fsa_idx,:,:]
+print(len(out_fsa_idx), _start)
 for i in range(len(out_fsa_idx)):
-    f_twisted_sf.append(np.expand_dims(out_fsa[:,i,:,:], axis=1))
-#    print(f_twisted_sf[-1].shape)
+    f0_ff[:,_start,:,:] = f0_f[:,out_fsa_idx[i]-1,:,:]
+    _start = _start + 1
+f0_f = f0_ff
+'''
+f0_g = np.zeros_like(f_rct)
+for i in range(len(psi_surf)):
+    n = surf_len[i]
+    k = surf_idx[i,:n]-1
+    in_fsa_idx.update(k)
+    f0_g[:,k,:,:] = f_rct[:,_start:_start+n,:,:]
+    _start = _start + n
 
-max_nodes = 800
-f_twt_sf_rct = list()
-ioRead_rct = adios.DeclareIO("ioReader")
-#ibpStream = ioRead_rct.Open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/data/i_f.mgard.bp', ad2.Mode.Read)
-ibpStream = ioRead_rct.Open('/Users/qg7/Documents/Projs/XGC Fusion/data files/low_res/d3d_coarse_v2/decompressed_twt_surface.bp', ad2.Mode.Read)
-max_nodes = max_nodes*8*39*39
-for i in range(steps):
-    ibpStream.BeginStep()
-    var_i_f = ioRead_rct.InquireVariable("rct_i_f")
-    i_f = np.zeros(max_nodes, dtype=np.double)
-    ibpStream.Get(var_i_f, i_f, ad2.Mode.Sync)
-    num_nodes = int(np.count_nonzero(i_f)/39/39/8)
-    f_twt_sf_rct.append(np.moveaxis(np.reshape(i_f[:num_nodes*39*39*8], [num_nodes, 8, 39, 39]), [0,1,2,3], [1,0,2,3]))
-    ibpStream.EndStep()
-ibpStream.Close()
+out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
+print(len(out_fsa_idx), _start)
+for i in range(len(out_fsa_idx)):
+    f0_g[:,out_fsa_idx[i]-1,:,:] = f_rct[:,_start,:,:] 
+    _start = _start + 1
 
+del f_rct
 
-f_twt_sf_rct_nodes = list()
-L_inf_twt_sf 	   = list()
-L_inf_twt_sf_perc  = list()
-L2_twt_sf	   = list() 
-for i in range(steps):
-    for j in range(f_twisted_sf[i].shape[1]):
-        f_twt_sf_rct_nodes.append(np.sum(f_twt_sf_rct[i][:,j,:,:]))
-        temp = f_twt_sf_rct[i][:,j,:,:] - f_twisted_sf[i][:,j,:,:]
-        L_inf_twt_sf.append(np.max(abs(temp)))
-        L_inf_twt_sf_perc.append(L_inf_twt_sf[-1]/np.max(f_twisted_sf[i][:,j,:,:])) 
-        L2_twt_sf.append(np.sum(temp * temp)) 
-#        print(i, L_inf_twt_sf_perc[-1]/1e13, L_inf_twt_sf_perc[-1]) 
-L2_twt_sf = np.array(L2_twt_sf)
-L2_twt_sf = np.sqrt(L2_twt_sf/(39*39*8))
-
-temp            = f_ori - f_rct
-L_inf_ori       = np.max(np.max(np.max(abs(temp), axis=-1), axis=-1), axis=0)
-L_inf_ori_perc  = L_inf_ori/np.max(np.max(np.max(f_ori, axis=-1), axis=-1), axis=0) 
-L2_ori		    = np.sqrt(np.sum(np.sum(np.sum(temp*temp, axis=-1), axis=-1), axis=0)/(39*39*8)) 
-
-f_twt_ori_nodes = np.sum(np.sum(np.sum(f_twisted_ori, axis=-1), axis=-1), axis=0)
-temp			= f_twisted_rct - f_twisted_ori
-L_inf_twt       = np.max(np.max(np.max(abs(temp), axis=-1), axis=-1), axis=0)
-L_inf_twt_perc  = L_inf_twt/np.max(np.max(np.max(f_twisted_ori, axis=-1), axis=-1), axis=0)
-L2_twt          = np.sqrt(np.sum(np.sum(np.sum(temp*temp, axis=-1), axis=-1), axis=0)/(39*39*8)) 
+relabserr = np.max(relative_abs_error(f0_f, f0_g), axis=(2,3))
+idx = np.where(relabserr[0,:]>0.0001)
+print(idx)
+#f0_f[:,idx,:,:] = 1e-05
+#f0_g[:,idx,:,:]= 1e-05
+#relabserr = np.max(relative_abs_error(f0_f, f0_g), axis=(2,3))
+#idx = np.where(relabserr[0,:]>0.0001)
+#print(out_fsa_idx)
+#point_rel = np.max(relative_ptw_abs_error(f0_f, f0_g), axis=(2,3))
+print (relabserr.max())#, point_rel.max())
 
 plt.figure()
-plt.plot(f_twt_ori_nodes, label = 'original twisted data')
-plt.plot(f_twt_sf_rct_nodes, label = 'reconstruction by flux surface')
-plt.legend()
-plt.savefig('point_wise_err.eps')
-plt.close()
-plt.figure()
-plt.plot(L_inf_twt_sf, linewidth=1, label = 'by flux surface reconstruction')
-plt.plot(L_inf_ori, linewidth=1, label = 'original reconstruction')
-plt.plot(L_inf_twt, linewidth=1, label = 'twisted data reconstruction')
-plt.legend()
-print("max abs err -- original: {}, untwisted 4D: {},  by surface: {}".format(np.max(L_inf_ori), np.max(L_inf_twt), np.max(L_inf_twt_sf)))
-plt.savefig('L_inf_err.eps')
-plt.close()
+trimesh = tri.Triangulation(r, z, conn)
+#err_pt = np.zeros_like(relabserr[0,:])
+#idx = np.where(relabserr[0,:]<0.0001)
+#err_pt[idx] = relabserr[0,idx]
+#plt.tricontourf(trimesh, err_pt)#, levels=20)
+plt.tricontourf(trimesh, relabserr[0,:])#, levels=20)
+plt.axis('equal');
+plt.axis('off')
+cbar = plt.colorbar()
+plt.savefig('error_RZ.png')
 
-plt.figure()
-plt.plot(L_inf_twt_sf_perc, linewidth=1, label = 'by flux surface reconstruction')
-plt.plot(L_inf_ori_perc, linewidth=1, label = 'original reconstruction')
-plt.plot(L_inf_twt_perc, linewidth=1, label = 'twisted data reconstruction')
-plt.legend()
-print("max perc err -- original: {}, untwisted 4D: {}, by surface: {}".format(np.max(L_inf_ori_perc), np.max(L_inf_twt_perc), np.max(L_inf_twt_sf_perc)))
-plt.savefig('L_inf_perc_err.eps')
+n_phi = f0_f.shape[0]
+f0_inode1 = 0
+ndata = f0_f.shape[1]
 
-plt.figure()
-plt.plot(L2_twt_sf, linewidth=1, label = 'by flux surface reconstruction')
-plt.plot(L2_ori, linewidth=1, label = 'original reconstruction')
-plt.plot(L2_twt, linewidth=1, label = 'twisted data reconstruction')
-plt.legend()
-print("max perc err -- original: {}, untwisted 4D: {}, by surface: {}".format(np.max(L2_ori), np.max(L2_twt), np.max(L2_twt_sf)))
-plt.savefig('L2_err.eps')
+den_f    = np.zeros_like(f0_f)
+u_para_f = np.zeros_like(f0_f)
+T_perp_f = np.zeros_like(f0_f)
+T_para_f = np.zeros_like(f0_f)
+n0_f     = np.zeros([n_phi, ndata])
+T0_f     = np.zeros([n_phi, ndata])
 
-surf_min = np.zeros(16395)
-for i in range(surf_idx.shape[0]):
-	temp = surf_idx[i][np.where(surf_idx[i]>0)[0].min()]-1
-	surf_min[temp] = L2_twt_sf[temp]
-plt.figure()
-plt.plot(L2_twt_sf[:], linewidth=1)
-plt.plot(surf_min, 'r^', markersize=2)
-plt.savefig('err_analysis.eps')
+den_g    = np.zeros_like(f0_f)
+u_para_g = np.zeros_like(f0_f)
+T_perp_g = np.zeros_like(f0_f)
+T_para_g = np.zeros_like(f0_f)
+n0_g     = np.zeros([n_phi, ndata])
+T0_g     = np.zeros([n_phi, ndata])
 
-np.save('L2_err.npy', np.column_stack((L2_ori, L2_twt, L2_twt_sf)))
+for iphi in range(n_phi):
+    den_f[iphi,], u_para_f[iphi,], T_perp_f[iphi,], T_para_f[iphi,], n0_f[iphi,], T0_f[iphi,] =\
+        xgcexp.f0_diag(f0_inode1=f0_inode1, ndata=ndata, isp=1, f0_f=f0_f[iphi,:])
+    den_g[iphi,], u_para_g[iphi,], T_perp_g[iphi,], T_para_g[iphi,], n0_g[iphi,], T0_g[iphi,] =\
+         xgcexp.f0_diag(f0_inode1=f0_inode1, ndata=ndata, isp=1, f0_f=f0_g[iphi,:])
 
-np.save('L_inf.npy', np.column_stack((L_inf_ori, L_inf_twt, L_inf_twt_sf)))
+print (den_g.shape, u_para_g.shape, T_perp_g.shape, T_para_g.shape, n0_g.shape, T0_g.shape)
 
+def compute_diff(name, x, x_):
+        assert(x.shape == x_.shape)
+        gb_L_inf  = relative_abs_error(np.sum(x, axis=(2,3)), np.sum(x_, axis=(2,3)))
+#        rel_L_inf = relative_ptw_abs_error(np.sum(x,axis=(2,3)), np.sum(x_, axis=(2,3)))
+#        plt.figure()
+#        trimesh = tri.Triangulation(r, z, conn)
+#        print(np.mean(rel_L_inf, axis=0).shape, np.mean(gb_L_inf, axis=0).shape)
+#        plt.tricontourf(trimesh, np.mean(rel_L_inf, axis=0))
+#        plt.axis('scaled')
+#        plt.colorbar()
+#        plt.savefig(name+'_tri_rpt.png')
+#        plt.close()
+        plt.figure()
+        trimesh = tri.Triangulation(r, z, conn)
+        plt.tricontourf(trimesh, np.mean(gb_L_inf, axis=0))
+        plt.axis('equal');
+        plt.axis('off')
+        plt.colorbar()
+        plt.savefig(name+'_tri_rgb.png')
+        plt.close()
+#        np.save(name+'.npy', rel_L_inf)
+#        np.save(name+'_data.npy', x_)
+#        np.save(name+'_rct.npy', x)
+        print("{}, shape = {}: L-inf error = {}".format(name, x.shape, np.max(gb_L_inf)))
+
+# compare
+compute_diff("density_5d", den_f  , den_g)
+compute_diff("u_para_5d", u_para_f, u_para_g)
+compute_diff("T_perp_5d", T_perp_f, T_perp_g)
+compute_diff("T_para_5d", T_para_f, T_para_g)

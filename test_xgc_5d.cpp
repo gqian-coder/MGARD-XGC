@@ -6,7 +6,7 @@
 #include <mpi.h>
 
 #include "adios2.h"
-#include "mgard_api.h"
+#include "mgard/mgard_api.h"
 
 #define SECONDS(d) std::chrono::duration_cast<std::chrono::seconds>(d).count()
 
@@ -78,12 +78,11 @@ int main(int argc, char **argv) {
     bool rel = (strcmp(argv[1], "rel") == 0);
     tol = atof(argv[2]);
     if (rel) tol = log(1+tol);
-    char datapath[2048], filename[2048], readin_f[2048];
+    char datapath[2048], filename[2048], readin_f[2048], write_f[2048];
     strcpy(datapath, argv[3]);
     strcpy(filename, argv[4]);
     timeSteps = atoi(argv[5]);
     unsigned char *compressed_data = 0;
-    size_t pad_sz = 8;
     double *i_f_5d;
     std::vector<std::size_t> shape(4);
     if (rank==0) {
@@ -114,15 +113,15 @@ int main(int argc, char **argv) {
             shape = var_i_f_in.Shape();
             temp_dim  = (size_t)ceil((float)shape[2]/np_size);
             local_dim = ((rank==np_size-1) ? (shape[2]-temp_dim*rank) : temp_dim);
-            temp_sz   = (temp_dim +pad_sz*2)*shape[0]*shape[1]*shape[3];
-            local_sz  = (local_dim+pad_sz*2)*shape[0]*shape[1]*shape[3]; 
+            temp_sz   = temp_dim  * shape[0]*shape[1]*shape[3];
+            local_sz  = local_dim * shape[0]*shape[1]*shape[3]; 
             i_f_5d = new double[temp_sz * timeSteps];
             if (rank==0) 
                 std::cout << "global shape: {" << shape[0] << ", " << shape[1] << ", " << shape[2] << ", " << shape[3] << "}, ";
         }
 
-        size_t start_pos = (rank==0) ? 0 : temp_dim*rank-pad_sz;
-        size_t read_node = (np_size==1) ? local_dim : ((rank==0 || rank==np_size-1) ? local_dim+pad_sz : local_dim+pad_sz*2);
+        size_t start_pos = (rank==0) ? 0 : temp_dim*rank;
+        size_t read_node = local_dim;
         if (ts==0) {
             std::cout << "processor " << rank << " read " << readin_f << " frome: {0, 0, " << temp_dim*rank << ", 0} for {";
             std::cout << shape[0] << ", " << shape[1] << ", " << local_dim << ", " << shape[3] << "}.\n";
@@ -132,45 +131,31 @@ int main(int argc, char **argv) {
         reader.Get<double>(var_i_f_in, i_f);
         reader.Close();
 
-        double *cp_pos = ((rank==0) ? &i_f_5d[ts*temp_sz+pad_sz] : &i_f_5d[ts*temp_sz]);
-        memcpy(cp_pos, i_f.data(), i_f.size()*sizeof(double));
+        memcpy(&i_f_5d[ts*temp_sz], i_f.data(), i_f.size()*sizeof(double));
         std::cout << "rank " << rank << " readin size: " << i_f.size() << "\n";
-        size_t step = shape[0]*shape[1]*shape[3];
-        if (rank==0)  {
-            for (size_t i=0; i<pad_sz; i++) {
-                size_t k = i*step;
-                memcpy(cp_pos+k, i_f.data(), sizeof(double)*step); 
-            }
-        }
-        if (rank==np_size-1) {
-            for (size_t i=0; i<pad_sz; i++) {
-                size_t k = i*step;
-                memcpy(cp_pos+k+i_f.size(), i_f.data()+i_f.size()-1, sizeof(double)*step);
-            } 
-        }
     }
     if (rel) {
         for (size_t it=0; it < temp_sz * timeSteps; it++) 
             i_f_5d[it] = log(i_f_5d[it]);
     }
     std::cout << "begin compression...\n";
-    size_t pading_elem=pad_sz*shape[0]*shape[1]*shape[3];
+    sprintf(write_f, "%s%s", filename, ".mgard.1e12"); 
     if (timeSteps==1) {
-        const std::array<std::size_t, 4> dims = {shape[0], shape[1], local_dim+pad_sz*2, shape[3]};
+        const std::array<std::size_t, 4> dims = {shape[0], shape[1], local_dim, shape[3]};
         const mgard::TensorMeshHierarchy<4, double> hierarchy(dims);
         const size_t ndof = hierarchy.ndof();
         const mgard::CompressedDataset<4, double> compressed = mgard::compress(hierarchy, i_f_5d, 0.0, tol);
         std::cout << "processor " << rank << ", after compression: " << compressed.size() << "\n";
         const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed);
-        FileWriter_ad(strcat(filename, ".mgard"), ((double *)decompressed.data())+pading_elem, {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], shape[1], local_dim, shape[3]}, temp_dim, rel);
+        FileWriter_ad(write_f, ((double *)decompressed.data()), {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], shape[1], local_dim, shape[3]}, temp_dim, rel);
     } else {
-        const std::array<std::size_t, 5> dims = {timeSteps, shape[0], shape[1], local_dim+pad_sz*2, shape[3]};
+        const std::array<std::size_t, 5> dims = {timeSteps, shape[0], shape[1], local_dim, shape[3]};
         const mgard::TensorMeshHierarchy<5, double> hierarchy(dims);
         const size_t ndof = hierarchy.ndof();
         const mgard::CompressedDataset<5, double> compressed = mgard::compress(hierarchy, i_f_5d, 0.0, tol);
         std::cout << "Processor " << rank << ", after compression: " << compressed.size() << "\n"; 
         const mgard::DecompressedDataset<5, double> decompressed = mgard::decompress(compressed); 
-        FileWriter_ad(strcat(filename, ".mgard"), ((double *)decompressed.data())+pading_elem, {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], shape[1], local_dim, shape[3]}, temp_dim, rel);
+        FileWriter_ad(write_f, ((double *)decompressed.data()), {timeSteps, shape[0], shape[1], shape[2], shape[3]}, {timeSteps, shape[0], shape[1], local_dim, shape[3]}, temp_dim, rel);
     }
     stop = clock.now();
     duration = stop - start;

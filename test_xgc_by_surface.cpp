@@ -9,7 +9,7 @@
 #include <math.h>
 
 #include "adios2.h"
-#include "mgard_api.h"
+#include "mgard/mgard_api.h"
 
 #define SECONDS(d) std::chrono::duration_cast<std::chrono::seconds>(d).count()
 
@@ -55,37 +55,6 @@ void FileWriter_ad(const char *filename, Type *data, std::vector<size_t> global_
     std::cout << "processor " << rank << " finish FileWriter -- " << filename << "\n";
 }
 
-template<typename Type>
-const double* mgard_reconstruct_3D(Type *data, std::vector<size_t> shape, size_t timeStep)
-{
-    const std::array<size_t, 3> dims = {shape[0], shape[1], shape[2]};
-    const mgard::TensorMeshHierarchy<3, double> hierarchy(dims);
-    const size_t ndof = hierarchy.ndof();
-    double tol = 1e13;
-    const mgard::CompressedDataset<3, double> compressed =
-        mgard::compress(hierarchy, data, 0.0, tol);
-//    std::cout << "after compression: " << compressed.size() << "\n";
-    const mgard::DecompressedDataset<3, Type> decompressed = mgard::decompress(compressed);
-//    FileWriter_ad(("i_f.mgard." + std::to_string(timeStep) + ".bp").c_str(), (double *)decompressed.data(), {shape[0], 1, shape[1], shape[2]});
-    return decompressed.data();
-}
-
-
-template<typename Type>
-const double* mgard_reconstruct_4D(Type *data, std::vector<size_t> shape, size_t timeStep)
-{
-    const std::array<size_t, 4> dims = {shape[0], shape[1], shape[2], shape[3]}; 
-    const mgard::TensorMeshHierarchy<4, double> hierarchy(dims);
-    const size_t ndof = hierarchy.ndof();
-    double tol = 1e13;
-    const mgard::CompressedDataset<4, double> compressed =
-        mgard::compress(hierarchy, data, 0.0, tol);
-//    std::cout << "after compression: " << compressed.size() << "\n";
-    const mgard::DecompressedDataset<4, double> decompressed = mgard::decompress(compressed);
-//    FileWriter_ad(("i_f.mgard." + std::to_string(timeStep) + ".bp").c_str(), (double *)decompressed.data(), shape);
-    return decompressed.data();
-}
-
 template<typename Real>
 std::vector<double> L_inif_L2_error(Real *ori, Real *rct, size_t count)
 {
@@ -109,10 +78,10 @@ int main(int argc, char **argv) {
 	std::chrono::steady_clock::time_point start, stop;
 	std::chrono::steady_clock::duration duration;
 
-    double tol;
+    double tol, rel_tol;
     bool rel = (strcmp(argv[1], "rel") == 0);
-    tol = atof(argv[2]);
-    if (rel) tol = log(1+tol);
+    rel_tol = atof(argv[2]);
+    if (rel) tol = log(1+rel_tol);
     char datapath[2048], filename[2048], readin_f[2048];
     strcpy(datapath, argv[3]);
     strcpy(filename, argv[4]);
@@ -122,8 +91,7 @@ int main(int argc, char **argv) {
     int pad_elem = 8, min_elem = 0, max_elem = 0;
     std::vector<int> shape_pscan(timeSteps, 0); 
     if (rank==0) {
-        if (rel) std::cout << "relative eb = " << tol << "\n";
-        else std::cout << "absolute eb = " << tol << "\n";
+        std::cout << "relative eb = " << tol << "\n";
         std::cout << "number of timeSteps: " << timeSteps << "\n";
         std::cout << "readin: " << readin_f << "\n";
     }
@@ -188,12 +156,16 @@ int main(int argc, char **argv) {
         std::vector<double>i_f_in;
         reader.Get<double>(var_i_f_in, i_f_in); 
         reader.EndStep();
+        if (!rel_tol) {
+            std::vector<double>::iterator max_v = std::max_element(i_f_in.begin(), i_f_in.end());
+            tol = (*max_v) * rel_tol;
+        }
+        std::cout << "rank " << rank << ", step: " << timeStep << ", tol: " << tol << "\n";
         size_t offset_d1= (timeStep==0) ? 0 : shape_pscan[timeStep-1];
         size_t tot_elem = std::accumulate(shape.begin(), shape.end(), 1, std::multiplies<size_t>());
         if (shape[0] < 2) { // isolated mesh node, no need for padding
             const std::array<size_t, 3> dims = {shape[1], shape[2], shape[3]};
             const mgard::TensorMeshHierarchy<3, double> hierarchy(dims);
-            std::cout << shape[0] << ", " << shape[2] << ", " << shape[3] << " -- "<< tol << "\n";
             const mgard::CompressedDataset<3, double> compressed = mgard::compress(hierarchy, i_f_in.data(), 0.0, tol);
             compressed_sz += compressed.size();
             const mgard::DecompressedDataset<3, double> decompressed = mgard::decompress(compressed);
@@ -208,7 +180,7 @@ int main(int argc, char **argv) {
             size_t step = shape[1]*shape[2]*shape[3];
             for (size_t ipd=0; ipd<pad_elem; ipd++) {
                 size_t k = ipd*step;
-                memcpy(&i_f_padding[k], &i_f_in[tot_elem-k-step], step*sizeof(double));
+                memcpy(&i_f_padding[k], &i_f_in[tot_elem-(pad_elem-ipd)*step], step*sizeof(double));
                 memcpy(&i_f_padding[min_elem+tot_elem+k], &i_f_in[k], step*sizeof(double));
             }
             // MGARD compression

@@ -132,7 +132,6 @@ int main(int argc, char **argv) {
                 size_t s_padding = shape[2]*shape[3];
                 for (size_t ipd=0; ipd<pad_elem; ipd++) {
                     size_t k = ipd*s_padding;
-//                    if (iphi==15) std::cout << ipd << ", " << k << ", " << step-s_padding-k << ", " << min_elem+step+k << ", " << min_elem<< "\n";
 //                    memcpy(&i_f_padding[k], &data_pos[step-1-k-s_padding], s_padding*sizeof(double));
                     memcpy(&i_f_padding[k], &data_pos[step-(pad_elem-ipd)*s_padding], s_padding*sizeof(double)); 
                     memcpy(&i_f_padding[min_elem+step+k], &data_pos[k], s_padding*sizeof(double));

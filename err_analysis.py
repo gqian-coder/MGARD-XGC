@@ -1,5 +1,6 @@
 import numpy as np
 import sys
+#sys.path.append('/ccs/home/gongq/andes/indir/lib/python3.7/site-packages/adios2/')
 sys.path.append('/ccs/home/gongq/indir/lib/python3.7/site-packages/adios2/')
 import matplotlib
 matplotlib.use('Agg')
@@ -20,13 +21,57 @@ def relative_abs_error(x, y):
     maxv = np.max(np.abs(x))
     return (absv/maxv)
 
-def relative_ptw_abs_error(x, y):
+def relative_node_abs_error(x, y):
     """
     relative point-wise L-inf error: max(|x_i - y_i|/|x_i|)
     """
     assert(x.shape == y.shape)
     absv = np.abs(x-y)
-    return (absv/x)
+    maxv = np.max(np.abs(x), axis=(2,3))
+    return (np.max(absv, axis=(2,3))/maxv)
+
+def compute_diff(name, x, x_, res_folder):
+    assert(x.shape == x_.shape)
+    gb_L_inf  = relative_abs_error(x, x_)
+    if (len(x.shape)==4):
+        gb_L_inf = np.max(gb_L_inf, axis=(-1,-2))
+        index    = np.argmax(gb_L_inf[0,:])
+    else:
+        index    = np.argmax(gb_L_inf[0,:])
+    plt.figure()
+    trimesh = tri.Triangulation(r, z, conn)
+    plt.tricontourf(trimesh, np.mean(gb_L_inf, axis=0))
+    plt.axis('equal');
+    plt.axis('off')
+    plt.colorbar()
+    plt.savefig(res_folder+name+'_tri_rgb.png')
+    plt.close()
+    print("{}, shape = {}: gb L-inf error = {} at {}".format(res_folder+name, x.shape, np.max(gb_L_inf), index))
+'''
+    rel_L_inf = relative_node_abs_error(x,x_)
+    plt.figure()
+    trimesh = tri.Triangulation(r, z, conn)
+    plt.tricontourf(trimesh, np.mean(x, axis=(0,2,3)))
+    plt.axis('scaled')
+    plt.colorbar()
+    plt.savefig(res_folder+name+'_ori.png')
+    plt.close()
+    plt.figure()
+    trimesh = tri.Triangulation(r, z, conn)
+    plt.tricontourf(trimesh, np.mean(x_, axis=(0,2,3)))
+    plt.axis('scaled')
+    plt.colorbar()
+    plt.savefig(res_folder+name+'_rct.png')
+    plt.close()
+    plt.figure()
+    trimesh = tri.Triangulation(r, z, conn)
+    plt.tricontourf(trimesh, np.mean(rel_L_inf, axis=0))
+    plt.axis('equal');
+    plt.axis('off')
+    plt.colorbar()
+    plt.savefig(res_folder+name+'_tri_rnd.png')
+    plt.close()
+'''
 
 steps = 101 
 adios = ad2.ADIOS()
@@ -55,128 +100,77 @@ z = rz[:,1]
 
 #with ad2.open(exdir + 'restart_dir/xgc.f0.00700.bp','r') as f:
 with ad2.open(exdir+'xgc.f0.10900.bp', 'r') as f:
-    f0_f = f.read('i_f')
+    f0_f = f.read('i_f')[0,:,:,:]
+f0_f = np.expand_dims(f0_f, axis=0)
 f0_f = np.moveaxis(f0_f,1,2)
-print (f0_f.shape)
 nnodes = f0_f.shape[1]
+n_surf = len(psi_surf) 
+f0_f = f0_f[:,:nnodes,:,:]
+#print (f0_f.shape)
 
+rfile_path = '/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/'
+fname = ['su412_10900_flx_phi.bp.fls.mgard.non.fls.']
+eb = ['1e10', '5e10', '1e11', '5e11', '1e12', '5e12', '1e13', '5e13']
+res_path = 'build/results/nonuniform_err_cr/'
 #with ad2.open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/d3d_coarse_v2_700_flx_phi.bp.mgard', 'r') as f:
-with ad2.open('/gpfs/alpine/proj-shared/csc143/gongq/andes/MReduction/MGARD-XGC/build/results/su412_10900_flx.bp.mgard', 'r') as f:
-    f_rct = f.read('i_f')
-f_rct = np.moveaxis(f_rct,0,1)
-print(f_rct.shape)
+for ifile in range(len(fname)):
+    for ieb in range(len(eb)):
+        rct_file = rfile_path + fname[ifile] + eb[ieb] 
+        print(rct_file)
+        with ad2.open(rct_file, 'r') as f:
+            f_rct = f.read('i_f')[0,:,:,:]
+            f_rct = np.expand_dims(f_rct, axis=0)
+#            print(f_rct.shape)
+            in_fsa_idx = set([])
+            _start = 0
+            f0_g = np.zeros_like(f_rct)
+            for i in range(n_surf):#len(psi_surf)):
+                n = surf_len[i]
+                k = surf_idx[i,:n]-1
+                in_fsa_idx.update(k)
+                f0_g[:,k,:,:] = f_rct[:,_start:_start+n,:,:]
+                _start = _start + n
+            del f_rct
 
-in_fsa_idx = set([])
-_start = 0
-'''
-f0_ff = np.zeros_like(f_rct)
-f0_g = f_rct
-for i in range(len(psi_surf)):
-    n = surf_len[i]
-    k = surf_idx[i,:n]-1
-    in_fsa_idx.update(k)
-    f0_ff[:,_start:_start+n,:,:] = f0_f[:,k,:,:]
-    _start = _start + n
+#            relabserr = np.max(relative_abs_error(f0_f, f0_g), axis=(2,3))
+#            print ('rel l-inf: ', relabserr.max())#, point_rel.max())
+            res_folder = res_path + 'fls/' + eb[ieb] + '/'
+#            if (ifile==0):
+#                res_folder = res_path + 'gb/' + eb[ieb] + '/'
+#            else:
+#                res_folder = res_path + 'fls/' + eb[ieb] + '/'
+            compute_diff("i-f", f0_f, f0_g, res_folder)
 
-out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
-print(len(out_fsa_idx), _start)
-for i in range(len(out_fsa_idx)):
-    f0_ff[:,_start,:,:] = f0_f[:,out_fsa_idx[i]-1,:,:]
-    _start = _start + 1
-f0_f = f0_ff
-'''
-f0_g = np.zeros_like(f_rct)
-for i in range(len(psi_surf)):
-    n = surf_len[i]
-    k = surf_idx[i,:n]-1
-    in_fsa_idx.update(k)
-    f0_g[:,k,:,:] = f_rct[:,_start:_start+n,:,:]
-    _start = _start + n
+            n_phi = f0_f.shape[0]
+            f0_inode1 = 0
+            ndata = f0_f.shape[1]
 
-out_fsa_idx = list(set(range(nnodes)) - in_fsa_idx)
-print(len(out_fsa_idx), _start)
-for i in range(len(out_fsa_idx)):
-    f0_g[:,out_fsa_idx[i]-1,:,:] = f_rct[:,_start,:,:] 
-    _start = _start + 1
+            den_f    = np.zeros_like(f0_f)
+            u_para_f = np.zeros_like(f0_f)
+            T_perp_f = np.zeros_like(f0_f)
+            T_para_f = np.zeros_like(f0_f)
+            n0_f     = np.zeros([n_phi, ndata])
+            T0_f     = np.zeros([n_phi, ndata])
 
-del f_rct
+            den_g    = np.zeros_like(f0_f)
+            u_para_g = np.zeros_like(f0_f)
+            T_perp_g = np.zeros_like(f0_f)
+            T_para_g = np.zeros_like(f0_f)
+            n0_g     = np.zeros([n_phi, ndata])
+            T0_g     = np.zeros([n_phi, ndata])
 
-relabserr = np.max(relative_abs_error(f0_f, f0_g), axis=(2,3))
-idx = np.where(relabserr[0,:]>0.0001)
-print(idx)
-#f0_f[:,idx,:,:] = 1e-05
-#f0_g[:,idx,:,:]= 1e-05
-#relabserr = np.max(relative_abs_error(f0_f, f0_g), axis=(2,3))
-#idx = np.where(relabserr[0,:]>0.0001)
-#print(out_fsa_idx)
-#point_rel = np.max(relative_ptw_abs_error(f0_f, f0_g), axis=(2,3))
-print (relabserr.max())#, point_rel.max())
+            for iphi in range(n_phi):
+                den_f[iphi,], u_para_f[iphi,], T_perp_f[iphi,], T_para_f[iphi,], n0_f[iphi,], T0_f[iphi,] =\
+                    xgcexp.f0_diag(f0_inode1=f0_inode1, ndata=ndata, isp=1, f0_f=f0_f[iphi,:])
+                den_g[iphi,], u_para_g[iphi,], T_perp_g[iphi,], T_para_g[iphi,], n0_g[iphi,], T0_g[iphi,] =\
+                    xgcexp.f0_diag(f0_inode1=f0_inode1, ndata=ndata, isp=1, f0_f=f0_g[iphi,:])
+#            print (den_g.shape, u_para_g.shape, T_perp_g.shape, T_para_g.shape, n0_g.shape, T0_g.shape)
+#        compute_diff("density_5d", den_f  , den_g   , res_folder)
+#        compute_diff("u_para_5d", u_para_f, u_para_g, res_folder)
+#        compute_diff("T_perp_5d", T_perp_f, T_perp_g, res_folder)
+#        compute_diff("T_para_5d", T_para_f, T_para_g, res_folder)
+        compute_diff("density_5d", np.sum(den_f   , axis=(-1,-2), dtype=np.float128), np.sum(den_g   , axis=(-1,-2), dtype=np.float128), res_folder)
+        compute_diff("u_para_5d" , np.sum(u_para_f, axis=(-1,-2), dtype=np.float128), np.sum(u_para_g, axis=(-1,-2), dtype=np.float128), res_folder)
+        compute_diff("T_perp_5d" , np.sum(T_perp_f, axis=(-1,-2), dtype=np.float128), np.sum(T_perp_g, axis=(-1,-2), dtype=np.float128), res_folder)
+        compute_diff("T_para_5d" , np.sum(T_para_f, axis=(-1,-2), dtype=np.float128), np.sum(T_para_g, axis=(-1,-2), dtype=np.float128), res_folder)
 
-plt.figure()
-trimesh = tri.Triangulation(r, z, conn)
-#err_pt = np.zeros_like(relabserr[0,:])
-#idx = np.where(relabserr[0,:]<0.0001)
-#err_pt[idx] = relabserr[0,idx]
-#plt.tricontourf(trimesh, err_pt)#, levels=20)
-plt.tricontourf(trimesh, relabserr[0,:])#, levels=20)
-plt.axis('equal');
-plt.axis('off')
-cbar = plt.colorbar()
-plt.savefig('error_RZ.png')
-
-n_phi = f0_f.shape[0]
-f0_inode1 = 0
-ndata = f0_f.shape[1]
-
-den_f    = np.zeros_like(f0_f)
-u_para_f = np.zeros_like(f0_f)
-T_perp_f = np.zeros_like(f0_f)
-T_para_f = np.zeros_like(f0_f)
-n0_f     = np.zeros([n_phi, ndata])
-T0_f     = np.zeros([n_phi, ndata])
-
-den_g    = np.zeros_like(f0_f)
-u_para_g = np.zeros_like(f0_f)
-T_perp_g = np.zeros_like(f0_f)
-T_para_g = np.zeros_like(f0_f)
-n0_g     = np.zeros([n_phi, ndata])
-T0_g     = np.zeros([n_phi, ndata])
-
-for iphi in range(n_phi):
-    den_f[iphi,], u_para_f[iphi,], T_perp_f[iphi,], T_para_f[iphi,], n0_f[iphi,], T0_f[iphi,] =\
-        xgcexp.f0_diag(f0_inode1=f0_inode1, ndata=ndata, isp=1, f0_f=f0_f[iphi,:])
-    den_g[iphi,], u_para_g[iphi,], T_perp_g[iphi,], T_para_g[iphi,], n0_g[iphi,], T0_g[iphi,] =\
-         xgcexp.f0_diag(f0_inode1=f0_inode1, ndata=ndata, isp=1, f0_f=f0_g[iphi,:])
-
-print (den_g.shape, u_para_g.shape, T_perp_g.shape, T_para_g.shape, n0_g.shape, T0_g.shape)
-
-def compute_diff(name, x, x_):
-        assert(x.shape == x_.shape)
-        gb_L_inf  = relative_abs_error(np.sum(x, axis=(2,3)), np.sum(x_, axis=(2,3)))
-#        rel_L_inf = relative_ptw_abs_error(np.sum(x,axis=(2,3)), np.sum(x_, axis=(2,3)))
-#        plt.figure()
-#        trimesh = tri.Triangulation(r, z, conn)
-#        print(np.mean(rel_L_inf, axis=0).shape, np.mean(gb_L_inf, axis=0).shape)
-#        plt.tricontourf(trimesh, np.mean(rel_L_inf, axis=0))
-#        plt.axis('scaled')
-#        plt.colorbar()
-#        plt.savefig(name+'_tri_rpt.png')
-#        plt.close()
-        plt.figure()
-        trimesh = tri.Triangulation(r, z, conn)
-        plt.tricontourf(trimesh, np.mean(gb_L_inf, axis=0))
-        plt.axis('equal');
-        plt.axis('off')
-        plt.colorbar()
-        plt.savefig(name+'_tri_rgb.png')
-        plt.close()
-#        np.save(name+'.npy', rel_L_inf)
-#        np.save(name+'_data.npy', x_)
-#        np.save(name+'_rct.npy', x)
-        print("{}, shape = {}: L-inf error = {}".format(name, x.shape, np.max(gb_L_inf)))
-
-# compare
-compute_diff("density_5d", den_f  , den_g)
-compute_diff("u_para_5d", u_para_f, u_para_g)
-compute_diff("T_perp_5d", T_perp_f, T_perp_g)
-compute_diff("T_para_5d", T_para_f, T_para_g)

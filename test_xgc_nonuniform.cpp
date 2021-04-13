@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
     strcpy(datapath, argv[3]);
     strcpy(filename, argv[4]);
     sprintf(readin_f, "%s%s", datapath, filename);
-    strcat(filename, ".mgard_non_gb");
+    strcat(filename, ".mgard.non.fls");
     size_t timeSteps = atoi(argv[5]);
     int pad_elem = 8, min_elem = 0, max_elem = 0;
     std::vector<int> shape_pscan(timeSteps, 0); 
@@ -68,9 +68,9 @@ int main(int argc, char **argv) {
         }
     }
     reader_s0.Close();
-    double base_x = 1.0/vx, base_y=1.0/vy;
     std::cout << "rank: " << rank << ", max_elem: " << max_elem << ", min_elem: " << min_elem << ", pad_elem: " << pad_elem <<  " total sz: " << shape_pscan[timeSteps-1] <<"\n";
 
+    nphi = 1;
     adios2::IO bpIO = ad.DeclareIO("WriteBP_File");
     adios2::Engine bpFileWriter = bpIO.Open(filename, adios2::Mode::Write);
     
@@ -81,9 +81,18 @@ int main(int argc, char **argv) {
     adios2::Engine reader = reader_io.Open(readin_f, adios2::Mode::Read);
     // read distance data
     adios2::IO reader_io_dist = ad.DeclareIO("XGC_distance");
-    sprintf(readin_f, "%s%s", datapath, "rz_dist.bp");
+    sprintf(readin_f, "%s%s", datapath, "grid_vol.bp");
     adios2::Engine reader_dist = reader_io_dist.Open(readin_f, adios2::Mode::Read);
     adios2::Variable<double> var_dist;
+
+    double base_x = (1.0-1.0/vx)/(vx-1), base_y=(1.0-1.0/vy)/(vy-1), base_t=1.0/timeSteps;
+    std::vector<double>coords_x(vx, 0.0), coords_y(vy, 0.0), coords_t(timeSteps, 0.0);
+    coords_x.at(0) = 0.5/vx;
+    coords_y.at(0) = 0.5/vy;
+    coords_t.at(0) = 0.5/timeSteps;
+    for (size_t idx=1; idx<vx; idx++) coords_x.at(idx) = base_x * idx + coords_x.at(0);
+    for (size_t idx=1; idx<vy; idx++) coords_y.at(idx) = base_y * idx + coords_y.at(0);
+    for (size_t idx=1; idx<timeSteps; idx++) coords_t.at(idx) = base_t * idx + coords_t.at(0);
 
     size_t rct_sec = 0;
     adios2::fstep iStep;
@@ -100,7 +109,7 @@ int main(int argc, char **argv) {
             continue;
         }
         var_i_f_in = reader_io.InquireVariable<double>("i_f");
-        var_dist   = reader_io_dist.InquireVariable<double>("dist");
+        var_dist   = reader_io_dist.InquireVariable<double>("f0_grid_vol_vonly");
         if ((!var_i_f_in) || (!var_dist)) {
             std::cout << "wrong variable inquiry...exit\n";
             exit(1);
@@ -120,15 +129,29 @@ int main(int argc, char **argv) {
         var_dist.SetSelection(adios2::Box<adios2::Dims>({0}, {shape[1]})); 
         reader_dist.Get<double>(var_dist, distance_z);
         reader_dist.EndStep();
+        std::vector<double>coords_z(shape[1]+2*pad_elem);
+        std::vector<double>vol_z(shape[1]+2*pad_elem);
+        std::copy(distance_z.begin(), distance_z.end(), vol_z.begin()+pad_elem);
+        std::copy(distance_z.begin(), distance_z.begin()+pad_elem, vol_z.begin()+shape[1]+pad_elem);
+        std::copy(distance_z.end()-pad_elem, distance_z.end(), vol_z.begin());
+        double FSL = std::accumulate(vol_z.begin(), vol_z.end(), 0.0);
+        double div = 1.0/FSL;
+        coords_z.at(0) = vol_z.at(0)*0.5*div;
+        for (size_t idx=1; idx<coords_z.size(); idx++) {
+            coords_z.at(idx) = (vol_z.at(idx-1) + vol_z.at(idx))*0.5 * div + coords_z.at(idx-1);
+        }
+        std::cout << "max x: " << coords_x.at(shape[2]-1) << ", max y: " << coords_y.at(shape[3]-1) << ", max z: " << coords_z.at(shape[1]-1) << "\n";
+        double max_vol = *std::max_element(vol_z.begin(), vol_z.end());
+
         if (!rel) {
 //            std::vector<double>::iterator max_v = std::max_element(i_f_in.begin(), i_f_in.end());
-            tol = rel_tol;//(*max_v) * rel_tol;
+            tol = rel_tol * 7.97125/max_vol;//(*max_v) * rel_tol;
         }
-//        std::cout << "rank " << rank << ", step: " << timeStep << ", tol: " << tol << "\n";
+        std::cout << "rank " << rank << ", step: " << timeStep << ", tol: " << tol << "\n";
         if (shape[1] < 2) { // isolated mesh node, no need for padding
             const std::array<size_t, 2> dims = {shape[2], shape[3]};
             const mgard::TensorMeshHierarchy<2, double> hierarchy(dims);
-            for (size_t iphi=0; iphi<shape[0]; iphi++) {
+            for (size_t iphi=0; iphi<nphi; iphi++) {
                 const mgard::CompressedDataset<2, double> compressed = mgard::compress(hierarchy, (i_f_in.data()+step*iphi), 0.0, tol);
                 compressed_sz += compressed.size();
                 const mgard::DecompressedDataset<2, double> decompressed = mgard::decompress(compressed);
@@ -140,33 +163,17 @@ int main(int argc, char **argv) {
             } 
         } else {
             // non-uniform spacing
-            std::vector<double>coords_z(shape[1]+2*pad_elem);
-            std::copy(distance_z.begin(), distance_z.end(), coords_z.begin()+pad_elem);
-            std::copy(distance_z.begin(), distance_z.begin()+pad_elem, coords_z.begin()+shape[1]+pad_elem);
-            std::copy(distance_z.end()-pad_elem, distance_z.end(), coords_z.begin());
-            std::vector<double>coords_x(vx, 0.0), coords_y(vy, 0.0);
-            for (size_t idx=0; idx<vx; idx++) coords_x.at(idx) = base_x * idx;
-            for (size_t idx=0; idx<vx; idx++) coords_y.at(idx) = base_y * idx;
-            double FSL = std::accumulate(coords_z.begin(), coords_z.end(), 0.0);
-            double div = 1.0/FSL;
-            coords_z.at(0) = coords_z.at(0);
-            for (size_t idx=1; idx<coords_z.size(); idx++) {
-                coords_z.at(idx) = (coords_z.at(idx) + coords_z.at(idx-1));
-            }
-            for (size_t idx=0; idx<coords_z.size(); idx++) coords_z.at(idx) = coords_z.at(idx) * div;
-//            std::cout << "\nrank " << rank << ", step " << timeStep << ", tol: " << tol << ", FSL: " << FSL << ", z[-1] = " << *(coords_z.end()-1) << ", x[-1]: " << *(coords_x.end()-1) << ", y[-1]: " << *(coords_y.end()-1)<< "\n"; 
             const std::array<std::vector<double>, 3> coords = {coords_z, coords_y, coords_x};
             const std::array<size_t, 3> dims = {shape[1]+pad_elem*2, shape[2], shape[3]};
 //            std::cout << shape[1]+pad_elem*2 << ", " << shape[2] << ", " << shape[3] << ", " << min_elem << "\n";
             const mgard::TensorMeshHierarchy<3, double> hierarchy(dims, coords);
             // padding using the periodic boundary condition
-            for (size_t iphi=0; iphi<shape[0]; iphi++) {
+            for (size_t iphi=0; iphi<nphi; iphi++) {
                 double *data_pos = i_f_in.data() + step*iphi; 
                 memcpy(&i_f_padding[min_elem], data_pos, step*sizeof(double));         
                 size_t s_padding = shape[2]*shape[3];
                 for (size_t ipd=0; ipd<pad_elem; ipd++) {
                     size_t k = ipd*s_padding;
-//                    if (iphi==15) std::cout << ipd << ", " << k << ", " << step-s_padding-k << ", " << min_elem+step+k << ", " << min_elem<< "\n";
                     memcpy(&i_f_padding[k], &data_pos[step-(pad_elem-ipd)*s_padding], s_padding*sizeof(double));
                     memcpy(&i_f_padding[min_elem+step+k], &data_pos[k], s_padding*sizeof(double));
                 }
